@@ -2,13 +2,16 @@ package azuread
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	"golang.org/x/crypto/pkcs12"
 
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/denisenkom/go-mssqldb/msdsn"
@@ -173,7 +176,11 @@ func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, se
 	case ActiveDirectoryServicePrincipal, ActiveDirectoryApplication:
 		switch {
 		case p.certificatePath != "":
-			cred, err = azidentity.NewClientCertificateCredential(tenant, p.clientID, p.certificatePath, &azidentity.ClientCertificateCredentialOptions{Password: p.clientSecret})
+			certificate, privateKey, certErr := loadCertificateAndPrivateKey(p.certificatePath, p.clientSecret)
+			if certErr != nil {
+				return "", err
+			}
+			cred, err = azidentity.NewClientCertificateCredential(tenant, p.clientID, []*x509.Certificate{certificate}, privateKey, &azidentity.ClientCertificateCredentialOptions{})
 		default:
 			cred, err = azidentity.NewClientSecretCredential(tenant, p.clientID, p.clientSecret, nil)
 		}
@@ -182,9 +189,9 @@ func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, se
 	case ActiveDirectoryPassword:
 		cred, err = azidentity.NewUsernamePasswordCredential(tenant, p.applicationClientID, p.user, p.password, nil)
 	case ActiveDirectoryMSI, ActiveDirectoryManagedIdentity:
-		cred, err = azidentity.NewManagedIdentityCredential(p.clientID, nil)
+		cred, err = azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{ID: azidentity.ClientID(p.clientID)})
 	case ActiveDirectoryInteractive:
-		cred, err = azidentity.NewInteractiveBrowserCredential(&azidentity.InteractiveBrowserCredentialOptions{AuthorityHost: authority, ClientID: p.applicationClientID})
+		cred, err = azidentity.NewInteractiveBrowserCredential(&azidentity.InteractiveBrowserCredentialOptions{AuthorityHost: azidentity.AuthorityHost(authority), ClientID: p.applicationClientID})
 
 	default:
 		// Integrated just uses Default until azidentity adds Windows-specific authentication
@@ -200,4 +207,17 @@ func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, se
 		return "", err
 	}
 	return tk.Token, err
+}
+
+func loadCertificateAndPrivateKey(certificatePath, password string) (*x509.Certificate, interface{}, error) {
+	certData, err := ioutil.ReadFile(certificatePath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	privateKey, certificate, err := pkcs12.Decode(certData, password)
+	if err != nil {
+		return nil, nil, err
+	}
+	return certificate, privateKey, nil
 }
