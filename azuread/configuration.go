@@ -2,16 +2,14 @@ package azuread
 
 import (
 	"context"
-	"crypto/x509"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
-	"golang.org/x/crypto/pkcs12"
 
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/denisenkom/go-mssqldb/msdsn"
@@ -176,11 +174,17 @@ func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, se
 	case ActiveDirectoryServicePrincipal, ActiveDirectoryApplication:
 		switch {
 		case p.certificatePath != "":
-			certificate, privateKey, certErr := loadCertificateAndPrivateKey(p.certificatePath, p.clientSecret)
+			certData, certErr := os.ReadFile(p.certificatePath)
 			if certErr != nil {
-				return "", err
+				certs, key, certErr := azidentity.ParseCertificates(certData, []byte(p.clientSecret))
+				if certErr != nil {
+					cred, err = azidentity.NewClientCertificateCredential(tenant, p.clientID, certs, key, nil)
+				} else {
+					err = certErr
+				}
+			} else {
+				err = certErr
 			}
-			cred, err = azidentity.NewClientCertificateCredential(tenant, p.clientID, []*x509.Certificate{certificate}, privateKey, &azidentity.ClientCertificateCredentialOptions{})
 		default:
 			cred, err = azidentity.NewClientSecretCredential(tenant, p.clientID, p.clientSecret, nil)
 		}
@@ -207,17 +211,4 @@ func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, se
 		return "", err
 	}
 	return tk.Token, err
-}
-
-func loadCertificateAndPrivateKey(certificatePath, password string) (*x509.Certificate, interface{}, error) {
-	certData, err := ioutil.ReadFile(certificatePath)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	privateKey, certificate, err := pkcs12.Decode(certData, password)
-	if err != nil {
-		return nil, nil, err
-	}
-	return certificate, privateKey, nil
 }
