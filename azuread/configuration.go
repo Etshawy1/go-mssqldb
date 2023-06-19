@@ -160,7 +160,7 @@ func splitAuthorityAndTenant(authorityUrl string) (string, string) {
 func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, serverSPN, stsURL string) (string, error) {
 	var cred azcore.TokenCredential
 	var err error
-	authority, tenant := splitAuthorityAndTenant(stsURL)
+	_, tenant := splitAuthorityAndTenant(stsURL)
 	// client secret connection strings may override the server tenant
 	if p.tenantID != "" {
 		tenant = p.tenantID
@@ -195,7 +195,7 @@ func (p *azureFedAuthConfig) provideActiveDirectoryToken(ctx context.Context, se
 	case ActiveDirectoryMSI, ActiveDirectoryManagedIdentity:
 		cred, err = azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{ID: azidentity.ClientID(p.clientID)})
 	case ActiveDirectoryInteractive:
-		cred, err = azidentity.NewInteractiveBrowserCredential(&azidentity.InteractiveBrowserCredentialOptions{AuthorityHost: azidentity.AuthorityHost(authority), ClientID: p.applicationClientID})
+		cred, err = azidentity.NewInteractiveBrowserCredential(&azidentity.InteractiveBrowserCredentialOptions{ClientID: p.applicationClientID})
 
 	default:
 		// Integrated just uses Default until azidentity adds Windows-specific authentication
